@@ -1,0 +1,697 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify,
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+# Q Business Starter Kit - CloudFormation Template
+# This template deploys an Amazon Q Business Application with required IAM roles and policies
+# It sets up necessary permissions for web experience and data source access
+#
+#
+#
+# Prerequisites:
+# - IAM Identity Center must be configured
+# - Secret Manager secrets for Confluence must be available if using Confluence integration
+# - Secret Manager secrets for Jira must be available if using Jira integration
+# - ServiceNow instance must be available if using ServiceNow integration
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: 
+  Deploy Amazon Q Business Application with support data.
+
+# Template Parameters Section
+# These parameters control which integrations are deployed and their configurations
+# These parameters must be provided when creating the stack
+# Key Components:
+# - Integration configurations for Confluence, Jira and ServiceNow
+# - Parameter validation rules and conditional resource creation
+
+Parameters:
+  # Core Configuration Parameters
+  # IAM Identity Center ARN is required for user authentication and authorization
+  IAMIdentityCenterARN:
+    Description: IAM Identity center is prerequisite to configure Q Business. Provide IAM Identity Instance ARN  
+    Type: String
+  
+  # Application name parameter used to identify the Q Business application
+  QBusinessApplicationName:
+    Description: The name of the Q Business Application
+    Type: String
+    Default: QBusinessStarterKitApp
+
+  QBusinessIndexType:
+    Description: The type of index for the Q Business Application
+    Type: String
+    AllowedValues:
+      - STARTER 
+      - ENTERPRISE
+    Default: STARTER
+  
+  ExistingConfluenceSecretArn:
+    Description: ARN of the Secret containing Confluence credentials, if applicable
+    Type: String
+    Default: ""
+
+  ConfluenceHostUrl:
+    Description: The host URL of the Confluence instance
+    Type: String
+    Default: ""
+
+  ExistingJiraSecretArn:
+    Description: ARN of the Secret containing Jira credentials, if applicable
+    Type: String
+    Default: ""
+
+  JiraHostUrl:
+    Description: The host URL of the Jira instance
+    Type: String
+    Default: ""    
+
+  ExistingServiceNowSecretArn:
+    Description: ARN of the Secret containing ServiceNow credentials, if applicable
+    Type: String
+    Default: "" 
+  
+  ServiceNowHostUrl:
+    Description: The host URL of the ServiceNow instance
+    Type: String
+    Default: ""  
+   
+  ServiceNowInstanceVersion:
+    Description: The version of ServiceNow instance
+    Type: String
+    AllowedValues:
+      - Tokyo
+      - San Diego
+      - Rome
+      - Vancouver
+      - Others
+    Default: Vancouver  
+          
+     
+
+# UI Configuration Section
+# Organizes parameters into logical groups in the CloudFormation console
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Q Business Configuration"
+        Parameters:
+          - QBusinessApplicationName
+          - QBusinessIndexType
+          - IAMIdentityCenterARN
+
+      - Label:
+          default: "Confluence Configuration"
+        Parameters:
+          - ExistingConfluenceSecretArn
+          - ConfluenceHostUrl
+
+      - Label:
+          default: "Jira Configuration"
+        Parameters:
+          - ExistingJiraSecretArn
+          - JiraHostUrl
+
+      - Label:
+          default: "ServiceNow Configuration"
+        Parameters:
+          - ExistingServiceNowSecretArn
+          - ServiceNowHostUrl
+          - ServiceNowInstanceVersion
+
+
+    ParameterLabels:
+      # Confluence Parameters
+      ExistingConfluenceSecretArn:
+        default: "Input your Existing Confluence Secret ARN"
+
+      # Jira Parameters
+      ExistingJiraSecretArn:
+        default: "Input your Existing Jira Secret ARN"
+
+      # ServiceNow Parameters
+      ExistingServiceNowSecretArn:
+        default: "Input your Existing ServiceNow Secret ARN"
+
+      # Core Configuration Parameters
+      QBusinessApplicationName:
+        default: "Q Business Application Name"
+      QBusinessIndexType:
+        default: "Q Business Index Type"
+      IAMIdentityCenterARN:
+        default: "IAM Identity Center ARN"
+  
+
+
+
+# Resources Section
+# Defines the AWS resources to be created
+Resources:
+  # IAM Role for Q Business Web Experience Service
+  # This role allows the Q Business application to perform web experience operations
+  QBusinessWebExperienceServiceRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: 
+              Service: 
+               - application.qbusiness.amazonaws.com
+            Action: 
+              - 'sts:AssumeRole'
+              - 'sts:SetContext'              
+            Condition:
+              StringEquals: 
+                "aws:SourceAccount": !Sub "${AWS::AccountId}"
+              ArnLike: 
+                "aws:SourceArn": !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}"
+      Path: /service-role/
+      ManagedPolicyArns:
+        - !Ref QBusinessWebExperienceServiceManagedPolicy
+    DependsOn:
+      - QBusinessWebExperienceServiceManagedPolicy         
+      
+  # Managed Policy for Web Experience Service Role
+  # Defines permissions for Q Business conversations, retrievers, and Q Apps
+  QBusinessWebExperienceServiceManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    Properties:      
+      Description: Q Web Experience Managed Policy
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Permissions for basic Q Business conversation features
+          - Sid: "QBusinessConversationPermission"
+            Effect: Allow
+            Action: 
+            - "qbusiness:Chat"
+            - "qbusiness:ChatSync"
+            - "qbusiness:ListMessages"
+            - "qbusiness:ListConversations"
+            - "qbusiness:DeleteConversation"
+            - "qbusiness:PutFeedback"
+            - "qbusiness:GetWebExperience"
+            - "qbusiness:GetApplication"
+            - "qbusiness:ListPlugins"
+            - "qbusiness:GetChatControlsConfiguration"
+            - "qbusiness:ListRetrievers"              
+            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}"
+
+          # Permissions for Q Business retriever operations
+          - Sid: "QBusinessRetrieverPermission"
+            Effect: Allow
+            Action: 
+            - "qbusiness:GetRetriever"
+            Resource: 
+            - !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}"
+            - !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:retriever/${QBusinessApp.ApplicationId}/retriever/*"
+
+          # KMS decrypt permissions for Q Business
+          - Sid: "QBusinessKMSDecryptPermissions"
+            Effect: Allow
+            Action: "kms:Decrypt"
+            Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/key_id"
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "qbusiness:${AWS::Region}:amazonaws.com"
+
+          # General Q Apps permissions not tied to specific apps
+          - Sid: "QAppsResourceAgnosticPermissions"
+            Effect: Allow
+            Action: 
+            -  "qapps:CreateQApp"
+            -  "qapps:PredictQApp"
+            -  "qapps:PredictProblemStatementFromConversation"
+            -  "qapps:PredictQAppFromProblemStatement"
+            -  "qapps:ListQApps"
+            -  "qapps:ListLibraryItems"
+            -  "qapps:CreateSubscriptionToken"
+            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}"
+
+          # Universal permissions for Q Apps
+          - Sid: "QAppsAppUniversalPermissions"
+            Effect: Allow
+            Action: 
+            -  "qapps:DisassociateQAppFromUser"
+            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/qapp/*"       
+
+          # Permissions for Q App owners
+          - Sid: "QAppsAppOwnerPermissions"
+            Effect: Allow
+            Action:
+            -  "qapps:GetQApp"
+            -  "qapps:CopyQApp" 
+            -  "qapps:CreateQApp"
+            -  "qapps:UpdateQApp"
+            -  "qapps:DeleteQApp"
+            -  "qapps:ImportDocument"
+            -  "qapps:ImportDocumentToQApp"
+            -  "qapps:CreateLibraryItem"
+            -  "qapps:UpdateLibraryItem"
+            -  "qapps:StartQAppSession"
+            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/qapp/*"
+            Condition:
+              StringEqualsIgnoreCase:
+                "qapps:UserIsAppOwner": "true"
+
+          # Permissions for published Q Apps
+          - Sid: "QAppsPublishedAppPermissions"
+            Effect: Allow
+            Action: 
+            -  "qapps:GetQApp"
+            -  "qapps:CopyQApp"
+            -   "qapps:AssociateQAppWithUser"
+            -   "qapps:GetLibraryItem"
+            -   "qapps:CreateLibraryItemReview"
+            -   "qapps:AssociateLibraryItemReview"
+            -   "qapps:DisassociateLibraryItemReview"
+            -   "qapps:StartQAppSession"
+            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/qapp/*"
+            Condition:
+              StringEqualsIgnoreCase:
+                "qapps:AppIsPublished": "true"
+
+          # Permissions for Q App session moderators
+          - Sid: "QAppsAppSessionModeratorPermissions"
+            Effect: Allow
+            Action: 
+            -  "qapps:ImportDocument"
+            -  "qapps:ImportDocumentToQAppSession"
+            -  "qapps:GetQAppSession"
+            -  "qapps:GetQAppSessionMetadata"
+            -  "qapps:UpdateQAppSession"
+            -  "qapps:UpdateQAppSessionMetadata"
+            -  "qapps:StopQAppSession"
+            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/qapp/*/session/*" 
+            Condition:
+              StringEqualsIgnoreCase:
+                "qapps:UserIsAppSessionModerator": "true"
+
+          # Permissions for shared Q App sessions
+          - Sid: "QAppsSharedAppSessionPermissions"
+            Effect: Allow
+            Action: 
+            -  "qapps:ImportDocument"
+            -  "qapps:ImportDocumentToQAppSession"
+            -  "qapps:GetQAppSession"
+            -  "qapps:GetQAppSessionMetadata"
+            -  "qapps:UpdateQAppSession"
+            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/qapp/*/session/*" 
+            Condition:
+              StringEqualsIgnoreCase:
+                "qapps:SessionIsShared": "true"
+
+
+  # IAM Role for Q Business Data Source access
+  # This role allows Q Business to access S3 and Secrets Manager
+  QBusinessDataSourceRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: 
+              Service: 
+               - qbusiness.amazonaws.com
+            Action: 
+              - 'sts:AssumeRole'
+            Condition:
+              StringEquals: 
+                "aws:SourceAccount": !Sub "${AWS::AccountId}"
+              ArnLike: 
+                "aws:SourceArn": !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}"
+      Path: /service-role/
+      ManagedPolicyArns:
+        - !Ref QBusinessDataSourceManagedPolicy
+    DependsOn:
+      - QBusinessDataSourceManagedPolicy      
+
+  # Managed Policy for Data Source Role
+  # Defines permissions for accessing S3 and Secrets Manager
+  QBusinessDataSourceManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    Properties:      
+      Description: Q DataSource Managed Policy
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Permission to read from S3
+          - Sid: "AllowsAmazonQToGetObjectfromS3"
+            Effect: Allow
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:${AWS::Partition}:s3:::bucket/*"
+            Condition:
+              StringEquals:
+                "aws:ResourceAccount": !Sub "${AWS::AccountId}"
+
+          # Permission to read secrets 
+          - Sid: "AllowsAmazonQToGetSecrets"
+            Effect: Allow
+            Action: "secretsmanager:GetSecretValue"
+            Resource: 
+              - !Ref ExistingConfluenceSecretArn
+              - !Ref ExistingJiraSecretArn
+              - !Ref ExistingServiceNowSecretArn
+
+          # Permission to decrypt secrets
+          - Sid: "AllowsAmazonQToDecryptSecret"
+            Effect: Allow
+            Action: "kms:Decrypt"
+            Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/key_id"
+            Condition:
+              StringLike:
+                "kms:ViaService": !Sub "secretsmanager.*.amazonaws.com"      
+          - Sid: "AllowsAmazonQToIngestDocuments"
+            Effect: Allow
+            Action: 
+            - "qbusiness:BatchPutDocument"
+            - "qbusiness:BatchDeleteDocument" 
+            Resource:
+            - !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/index/${QBusinessIndex.IndexId}"
+          - Sid: "AllowsAmazonQToIngestPrincipalMapping"
+            Effect: Allow
+            Action:
+            - "qbusiness:PutGroup"
+            - "qbusiness:CreateUser"
+            - "qbusiness:DeleteGroup"
+            - "qbusiness:UpdateUser"
+            - "qbusiness:ListGroups"
+            Resource:
+            - !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}"
+            - !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/index/${QBusinessIndex.IndexId}"
+            - !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApp.ApplicationId}/index/${QBusinessIndex.IndexId}/data-source/*"
+
+  QBusinessApp:
+    Type: AWS::QBusiness::Application
+    DeletionPolicy: Delete
+    Properties:
+      DisplayName: !Ref QBusinessApplicationName
+      Description: Q Support Insights
+      IdentityCenterInstanceArn: !Ref IAMIdentityCenterARN
+      RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/qbusiness.amazonaws.com/AWSServiceRoleForQBusiness
+
+  QBusinessIndex:
+    Type: AWS::QBusiness::Index
+    Properties:
+     ApplicationId: !GetAtt  QBusinessApp.ApplicationId
+     DisplayName: qci-insights-index
+     Type: !Ref QBusinessIndexType
+
+  QBusinessRetriver:
+    Type: AWS::QBusiness::Retriever
+    Properties:
+     ApplicationId: !GetAtt  QBusinessApp.ApplicationId
+     Configuration:
+      NativeIndexConfiguration:
+        IndexId: !GetAtt QBusinessIndex.IndexId
+     DisplayName: qci-insights-index
+     Type: NATIVE_INDEX
+
+  QBusinessWebExperience:
+    Type: AWS::QBusiness::WebExperience
+    Properties:
+     ApplicationId: !GetAtt  QBusinessApp.ApplicationId
+     RoleArn: !GetAtt QBusinessWebExperienceServiceRole.Arn
+     Title: Q Support Insights 
+  
+
+
+ 
+  QBusinessConfluenceDataSource:
+    Type: AWS::QBusiness::DataSource
+    DeletionPolicy: Delete
+    Properties:
+      ApplicationId: !GetAtt QBusinessApp.ApplicationId
+      Configuration:
+        type: "CONFLUENCEV2"
+        syncMode: "FULL_CRAWL"
+        enableIdentityCrawler: true
+        connectionConfiguration:
+          repositoryEndpointMetadata:
+            type: "SAAS"
+            authType: "Basic"
+            hostUrl: !Ref ConfluenceHostUrl
+        repositoryConfigurations:
+          space:
+            fieldMappings:
+              - indexFieldName: "space_name"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "spaceName"
+                dateFieldFormat: yyyy-MM-dd'T'HH:mm:ss'Z'
+          page:
+            fieldMappings:
+              - indexFieldName: "page_title"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "pageTitle"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+          blog:
+            fieldMappings:
+              - indexFieldName: "blog_title"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "blogTitle"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+          comment:
+            fieldMappings:
+              - indexFieldName: "comment_title"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "commentTitle"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+          attachment:
+            fieldMappings:
+              - indexFieldName: "attachment_title"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "attachmentTitle"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        additionalProperties:
+          isCrawlAcl: true
+          fieldForUserId: "email"
+          # inclusionSpaceKeyFilter:
+          # exclusionSpaceKeyFilter:
+          # pageTitleRegEX:
+          # blogTitleRegEX:
+          # commentTitleRegEX:
+          # attachmentTitleRegEX:
+          isCrawlPersonalSpace: false
+          isCrawlArchivedSpace: false
+          isCrawlArchivedPage: true
+          isCrawlPage: true
+          isCrawlBlog: true
+          isCrawlPageComment: true
+          isCrawlPageAttachment: true
+          isCrawlBlogComment: true
+          isCrawlBlogAttachment: true
+          maxFileSizeInMegaBytes: "50"
+          # inclusionFileTypePatterns:
+          # exclusionFileTypePatterns:
+          # inclusionUrlPatterns:
+          # exclusionUrlPatterns:
+          enableDeletionDetection: false
+          deletionProtectionThreshold: "15"
+        secretArn: !Ref ExistingConfluenceSecretArn
+        version: "1.0.0"
+      DisplayName: Confluence-datasource
+      SyncSchedule: 'cron(0 0 * * ? *)'
+      IndexId: !GetAtt QBusinessIndex.IndexId
+      RoleArn: !GetAtt QBusinessDataSourceRole.Arn
+
+
+  QBusinessJiraDataSource:
+    Type: AWS::QBusiness::DataSource
+    DeletionPolicy: Delete
+    Properties:
+      ApplicationId: !GetAtt QBusinessApp.ApplicationId
+      IndexId: !GetAtt QBusinessIndex.IndexId
+      DisplayName: Jira-datasource
+      RoleArn: !GetAtt QBusinessDataSourceRole.Arn
+      Configuration:
+        type: "JIRA"
+        syncMode: "FULL_CRAWL"
+        secretArn: !Ref ExistingJiraSecretArn
+        enableIdentityCrawler: true
+        connectionConfiguration:
+          repositoryEndpointMetadata:
+            jiraAccountUrl: !Ref JiraHostUrl
+        repositoryConfigurations:
+          attachment:
+            fieldMappings:
+              - indexFieldName: "attachment_id"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "id"
+                dateFieldFormat: yyyy-MM-dd'T'HH:mm:ss'Z'
+          comment:
+            fieldMappings:
+              - indexFieldName: "comment_body"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "body"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+          issue:
+            fieldMappings:
+              - indexFieldName: "issue_key"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "key"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+          project:
+            fieldMappings:
+              - indexFieldName: "project_name"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "name"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+          worklog:
+            fieldMappings:
+              - indexFieldName: "worklog_time_spent"
+                indexFieldType: "STRING"
+                dataSourceFieldName: "timeSpent"
+                dateFieldFormat: "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        additionalProperties:
+          isCrawlAcl: true
+          maxFileSizeInMegaBytes: "50"
+          fieldForUserId: "email"
+          issuetype: 
+            - "Task"
+            - "Bug"
+            - "Story"
+            - "Epic"
+          status:
+            - "To Do"
+            - "In Progress"
+            - "Done" 
+          enableDeletionDetection: false
+          deletionProtectionThreshold: "15"
+
+  QBusinessServiceNowDataSource:
+    Type: AWS::QBusiness::DataSource
+    DeletionPolicy: Delete
+    Properties:
+      ApplicationId: !GetAtt QBusinessApp.ApplicationId
+      IndexId: !GetAtt QBusinessIndex.IndexId
+      DisplayName: ServiceNow-datasource
+      RoleArn: !GetAtt QBusinessDataSourceRole.Arn
+      Configuration:
+        type: "SERVICENOWV2"
+        syncMode: "FULL_CRAWL"
+        secretArn: !Ref ExistingServiceNowSecretArn
+        enableIdentityCrawler: true
+        connectionConfiguration:
+          repositoryEndpointMetadata:
+            hostUrl: !Ref ServiceNowHostUrl
+            authType: "basicAuth"
+            servicenowInstanceVersion: !Ref ServiceNowInstanceVersion
+        repositoryConfigurations:
+          knowledgeArticle:
+            fieldMappings:
+              - indexFieldName: article_id
+                indexFieldType: STRING
+                dataSourceFieldName: id
+                dateFieldFormat: yyyy-MM-dd'T'HH:mm:ss'Z'
+          attachment:
+            fieldMappings:
+              - indexFieldName: attachment_id
+                indexFieldType: STRING
+                dataSourceFieldName: id
+                dateFieldFormat: yyyy-MM-dd'T'HH:mm:ss'Z'
+          serviceCatalog:
+            fieldMappings:
+              - indexFieldName: catalog_item_id
+                indexFieldType: STRING
+                dataSourceFieldName: id
+                dateFieldFormat: yyyy-MM-dd'T'HH:mm:ss'Z'
+          incident:
+            fieldMappings:
+              - indexFieldName: incident_id
+                indexFieldType: STRING
+                dataSourceFieldName: id
+                dateFieldFormat: yyyy-MM-dd'T'HH:mm:ss'Z'
+        additionalProperties:
+          maxFileSizeInMegaBytes: "50"
+          isCrawlKnowledgeArticle: "true"
+          isCrawlKnowledgeArticleAttachment: "true"
+          includePublicArticlesOnly: "false"
+          knowledgeArticleFilter: filter_condition
+          incidentQueryFilter: incident_condition
+          serviceCatalogQueryFilter: service_catalog_condition
+          isCrawlServiceCatalog: "true"
+          isCrawlServiceCatalogAttachment: "true"
+          isCrawlActiveServiceCatalog: "true"
+          isCrawlInactiveServiceCatalog: "false"
+          isCrawlIncident: "true"
+          isCrawlIncidentAttachment: "false"
+          isCrawlActiveIncident: "true"
+          isCrawlInactiveIncident: "false"
+          applyACLForKnowledgeArticle: "true"
+          applyACLForServiceCatalog: "true"
+          applyACLForIncident: "true"
+          incidentStateType:
+            - Open
+            - Resolved
+          knowledgeArticleTitleRegExp: ".*"
+          serviceCatalogTitleRegExp: ".*"
+          incidentTitleRegExp: ".*"
+          # inclusionFileTypePatterns:
+          #   - "*.pdf"
+          #   - "*.docx"
+          # exclusionFileTypePatterns:
+          #   - "*.tmp"
+          # inclusionFileNamePatterns:
+          #   - important-*
+          # exclusionFileNamePatterns:
+          #   - temporary-*
+          enableDeletionProtection: "false"
+          deletionProtectionThreshold: "15" 
+          
+Outputs: 
+  QBusinessApplicationArn:
+    Description: The ARN of the QBusiness application.
+    Value: !Ref QBusinessApp
+
+  QBusinessAppliationId:
+    Description: The ID of the QBusiness application.
+    Value: !GetAtt QBusinessApp.ApplicationId    
+
+  ConfluenceDataSourceId:
+    Description: The ID of the Confluence data source.
+    Value: !Ref QBusinessConfluenceDataSource
+
+  JiraDataSourceId:
+    Description: The ID of the Jira data source.
+    Value: !Ref QBusinessJiraDataSource
+
+  ServiceNowDataSourceId:
+    Description: The ID of the ServiceNow data source.
+    Value: !Ref QBusinessServiceNowDataSource
+
+  
+
+
+
+
+
+
+
+
+
+
+  
+
